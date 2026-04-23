@@ -30,6 +30,7 @@
       ]
     },
     "commands": [
+      { "command": "gitBranches.update",          "title": "Update Branch" },
       { "command": "gitBranches.checkout",       "title": "Checkout" },
       { "command": "gitBranches.merge",          "title": "Merge into Current" },
       { "command": "gitBranches.rebase",         "title": "Rebase onto This Branch" },
@@ -128,9 +129,14 @@
           "group": "1_checkout@1"
         },
         {
-          "command": "gitBranches.push",
+          "command": "gitBranches.update",
           "when": "view == gitBranches.branches && viewItem == localBranchCurrent",
           "group": "2_sync@1"
+        },
+        {
+          "command": "gitBranches.push",
+          "when": "view == gitBranches.branches && viewItem == localBranchCurrent",
+          "group": "2_sync@2"
         },
         {
           "command": "gitBranches.setUpstream",
@@ -154,9 +160,14 @@
           "group": "1_checkout@2"
         },
         {
-          "command": "gitBranches.merge",
+          "command": "gitBranches.update",
           "when": "view == gitBranches.branches && viewItem == localBranch",
           "group": "2_integrate@1"
+        },
+        {
+          "command": "gitBranches.merge",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "2_integrate@2"
         },
         {
           "command": "gitBranches.rebase",

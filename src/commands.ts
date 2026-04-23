@@ -87,6 +87,28 @@ export function registerCommands(
 
     // ---- Local branch commands ----
 
+    reg('gitBranches.update', async (item?) => {
+        if (!item) { return; }
+        const branch = item.ref as any;
+        const upstream = branch.upstream as { name: string; remote: string } | undefined;
+        if (!upstream) {
+            vscode.window.showErrorMessage(`"${item.ref.name}" has no upstream configured. Use Set Upstream first.`);
+            return;
+        }
+        const isCurrent = item.repo.state.HEAD?.name === item.ref.name;
+        if (isCurrent) {
+            // Current branch: git pull (respects pull.rebase config)
+            await withProgress(`Updating ${item.ref.name}...`, () =>
+                item.repo.pull()
+            );
+        } else {
+            // Non-current branch: fast-forward via git fetch remote src:dst
+            await withProgress(`Updating ${item.ref.name}...`, () =>
+                runGit(item.repo, ['fetch', upstream.remote, `${upstream.name}:${item.ref.name}`])
+            );
+        }
+    });
+
     reg('gitBranches.checkout', async (item?) => {
         if (!item) { return; }
         await withProgress(`Checking out ${item.ref.name}...`, () =>
