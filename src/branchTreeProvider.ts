@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GitApi, Ref, Repository } from './gitApi';
+import { Branch, GitApi, Ref, Repository } from './gitApi';
 
 // ---- Tree node types ----
 
@@ -18,13 +18,25 @@ export class BranchItem extends vscode.TreeItem {
         const isHead = itemContextValue === 'localBranch' && repo.state.HEAD?.name === ref.name;
         this.contextValue = isHead ? 'localBranchCurrent' : itemContextValue;
 
+        // Build ahead/behind indicator for local branches that have an upstream
+        let syncDesc = '';
+        if (itemContextValue === 'localBranch') {
+            const branch = ref as Branch;
+            const ahead  = branch.ahead  ?? 0;
+            const behind = branch.behind ?? 0;
+            if (ahead > 0 && behind > 0) { syncDesc = `↑${ahead} ↓${behind}`; }
+            else if (ahead > 0)          { syncDesc = `↑${ahead}`; }
+            else if (behind > 0)         { syncDesc = `↓${behind}`; }
+        }
+
         if (isHead) {
             this.iconPath = new vscode.ThemeIcon('star-full', new vscode.ThemeColor('charts.yellow'));
-            this.description = 'current';
+            this.description = syncDesc ? `current ${syncDesc}` : 'current';
         } else if (itemContextValue === 'tag') {
             this.iconPath = new vscode.ThemeIcon('tag');
         } else {
             this.iconPath = new vscode.ThemeIcon('git-branch');
+            if (syncDesc) { this.description = syncDesc; }
         }
     }
 }
