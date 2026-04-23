@@ -5,6 +5,10 @@
   "version": "0.0.1",
   "publisher": "vscode-git-branches",
   "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zhengxiaosong/vscode-git-branches.git"
+  },
   "engines": { "vscode": "^1.85.0" },
   "categories": ["SCM Providers"],
   "extensionDependencies": ["vscode.git"],

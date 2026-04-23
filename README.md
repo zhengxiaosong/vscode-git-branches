@@ -4,6 +4,8 @@ A VS Code extension that adds a dedicated **Branches** and **Tags** panel to the
 
 ## Features
 
+![screenshot](images/screenshot.png)
+
 ### Branches Panel
 
 Displays local and remote branches together in a single tree, grouped by scope:
