@@ -1,0 +1,10 @@
+.git/**
+.vscode/**
+.claude/**
+src/**
+node_modules/**
+esbuild.js
+tsconfig.json
+package-lock.json
+out/**/*.js.map
+images/*.svg

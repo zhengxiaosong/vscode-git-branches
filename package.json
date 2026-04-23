@@ -1,0 +1,239 @@
+{
+  "name": "vscode-git-branches",
+  "displayName": "Git Branches",
+  "description": "Local branches, remote branches, and tags management in the SCM sidebar",
+  "version": "0.0.1",
+  "publisher": "vscode-git-branches",
+  "icon": "images/icon.png",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["SCM Providers"],
+  "extensionDependencies": ["vscode.git"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "views": {
+      "scm": [
+        {
+          "id": "gitBranches.branches",
+          "name": "Branches",
+          "when": "gitOpenRepositoryCount > 0"
+        },
+        {
+          "id": "gitBranches.tags",
+          "name": "Tags",
+          "when": "gitOpenRepositoryCount > 0"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "gitBranches.checkout",       "title": "Checkout" },
+      { "command": "gitBranches.merge",          "title": "Merge into Current" },
+      { "command": "gitBranches.rebase",         "title": "Rebase onto This Branch" },
+      { "command": "gitBranches.cherryPick",     "title": "Cherry-pick Tip Commit" },
+      { "command": "gitBranches.rename",         "title": "Rename Branch" },
+      { "command": "gitBranches.push",           "title": "Push" },
+      { "command": "gitBranches.setUpstream",    "title": "Set Upstream" },
+      { "command": "gitBranches.createFrom",     "title": "Create Branch from Here" },
+      { "command": "gitBranches.deleteLocal",    "title": "Delete Branch" },
+      { "command": "gitBranches.checkoutRemote", "title": "Checkout (Create Tracking Branch)" },
+      { "command": "gitBranches.pull",           "title": "Fetch" },
+      { "command": "gitBranches.deleteRemote",   "title": "Delete Remote Branch" },
+      { "command": "gitBranches.checkoutTag",    "title": "Checkout Tag" },
+      { "command": "gitBranches.pushTag",        "title": "Push Tag" },
+      { "command": "gitBranches.deleteTag",      "title": "Delete Tag" },
+      { "command": "gitBranches.stash",          "title": "Stash Changes" },
+      { "command": "gitBranches.stashPop",       "title": "Pop Stash" },
+      { "command": "gitBranches.stashApply",     "title": "Apply Stash..." },
+      { "command": "gitBranches.stashDrop",      "title": "Drop Stash..." },
+      { "command": "gitBranches.fetchAll",       "title": "Fetch All" },
+      { "command": "gitBranches.createBranch",   "title": "Create Branch", "icon": "$(add)" },
+      { "command": "gitBranches.createTag",      "title": "Create Tag",  "icon": "$(add)" },
+      { "command": "gitBranches.openHistory",    "title": "View History", "icon": "$(history)" },
+      { "command": "gitBranches.refresh",        "title": "Refresh",      "icon": "$(refresh)" }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "gitBranches.createBranch",
+          "when": "view == gitBranches.branches",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gitBranches.refresh",
+          "when": "view == gitBranches.branches || view == gitBranches.tags",
+          "group": "navigation@2"
+        },
+        {
+          "command": "gitBranches.createTag",
+          "when": "view == gitBranches.tags",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "gitBranches.openHistory",
+          "when": "view == gitBranches.branches && viewItem == localBranchCurrent",
+          "group": "inline"
+        },
+        {
+          "command": "gitBranches.openHistory",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "inline"
+        },
+        {
+          "command": "gitBranches.openHistory",
+          "when": "view == gitBranches.branches && viewItem == remoteBranch",
+          "group": "inline"
+        },
+
+        {
+          "command": "gitBranches.createBranch",
+          "when": "view == gitBranches.branches && viewItem == localGroup",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "gitBranches.stash",
+          "when": "view == gitBranches.branches && viewItem == localGroup",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "gitBranches.stashPop",
+          "when": "view == gitBranches.branches && viewItem == localGroup",
+          "group": "1_actions@3"
+        },
+        {
+          "command": "gitBranches.stashApply",
+          "when": "view == gitBranches.branches && viewItem == localGroup",
+          "group": "1_actions@4"
+        },
+        {
+          "command": "gitBranches.stashDrop",
+          "when": "view == gitBranches.branches && viewItem == localGroup",
+          "group": "1_actions@5"
+        },
+
+        {
+          "command": "gitBranches.fetchAll",
+          "when": "view == gitBranches.branches && (viewItem == remoteSection || viewItem == remoteGroup)",
+          "group": "1_actions@1"
+        },
+
+        {
+          "command": "gitBranches.createFrom",
+          "when": "view == gitBranches.branches && viewItem == localBranchCurrent",
+          "group": "1_checkout@1"
+        },
+        {
+          "command": "gitBranches.push",
+          "when": "view == gitBranches.branches && viewItem == localBranchCurrent",
+          "group": "2_sync@1"
+        },
+        {
+          "command": "gitBranches.setUpstream",
+          "when": "view == gitBranches.branches && viewItem == localBranchCurrent",
+          "group": "2_sync@2"
+        },
+        {
+          "command": "gitBranches.rename",
+          "when": "view == gitBranches.branches && viewItem == localBranchCurrent",
+          "group": "3_manage@1"
+        },
+
+        {
+          "command": "gitBranches.checkout",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "1_checkout@1"
+        },
+        {
+          "command": "gitBranches.createFrom",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "1_checkout@2"
+        },
+        {
+          "command": "gitBranches.merge",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "2_integrate@1"
+        },
+        {
+          "command": "gitBranches.rebase",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "2_integrate@2"
+        },
+        {
+          "command": "gitBranches.cherryPick",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "2_integrate@3"
+        },
+        {
+          "command": "gitBranches.push",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "3_sync@1"
+        },
+        {
+          "command": "gitBranches.setUpstream",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "3_sync@2"
+        },
+        {
+          "command": "gitBranches.rename",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "4_manage@1"
+        },
+        {
+          "command": "gitBranches.deleteLocal",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "5_destructive@1"
+        },
+
+        {
+          "command": "gitBranches.checkoutRemote",
+          "when": "view == gitBranches.branches && viewItem == remoteBranch",
+          "group": "1_checkout@1"
+        },
+        {
+          "command": "gitBranches.cherryPick",
+          "when": "view == gitBranches.branches && viewItem == remoteBranch",
+          "group": "2_integrate@1"
+        },
+        {
+          "command": "gitBranches.pull",
+          "when": "view == gitBranches.branches && viewItem == remoteBranch",
+          "group": "3_sync@1"
+        },
+        {
+          "command": "gitBranches.deleteRemote",
+          "when": "view == gitBranches.branches && viewItem == remoteBranch",
+          "group": "4_destructive@1"
+        },
+
+        {
+          "command": "gitBranches.checkoutTag",
+          "when": "view == gitBranches.tags && viewItem == tag",
+          "group": "1_checkout@1"
+        },
+        {
+          "command": "gitBranches.pushTag",
+          "when": "view == gitBranches.tags && viewItem == tag",
+          "group": "2_sync@1"
+        },
+        {
+          "command": "gitBranches.deleteTag",
+          "when": "view == gitBranches.tags && viewItem == tag",
+          "group": "3_destructive@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "typecheck": "tsc --noEmit",
+    "watch": "node esbuild.js --watch",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#eef2ff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Card with transparent padding (10px on each side) -->
+  <rect x="10" y="10" width="108" height="108" rx="20" fill="url(#bg)"/>
+  <rect x="10.75" y="10.75" width="106.5" height="106.5" rx="19.5" fill="none" stroke="#bfdbfe" stroke-width="1.5"/>
+
+  <!-- Main branch vertical line -->
+  <line x1="51" y1="37" x2="51" y2="92" stroke="#3b82f6" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Feature branch curve then down -->
+  <path d="M51 58 C51 72 80 63 80 73" fill="none" stroke="#8b5cf6" stroke-width="5" stroke-linecap="round"/>
+  <line x1="80" y1="73" x2="80" y2="92" stroke="#8b5cf6" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Main branch nodes -->
+  <circle cx="51" cy="37" r="6" fill="#3b82f6" stroke="white" stroke-width="2.5"/>
+  <circle cx="51" cy="58" r="6" fill="#3b82f6" stroke="white" stroke-width="2.5"/>
+  <circle cx="51" cy="92" r="6" fill="#3b82f6" stroke="white" stroke-width="2.5"/>
+
+  <!-- Feature branch nodes -->
+  <circle cx="80" cy="73" r="6" fill="#8b5cf6" stroke="white" stroke-width="2.5"/>
+  <circle cx="80" cy="92" r="6" fill="#8b5cf6" stroke="white" stroke-width="2.5"/>
+
+  <!-- Star in top node -->
+  <polygon
+    points="51,32.5 52.06,35.54 55.28,35.61 52.71,37.56 53.65,40.64 51,38.8 48.35,40.64 49.29,37.56 46.72,35.61 49.94,35.54"
+    fill="white" opacity="0.95"/>
+</svg>
