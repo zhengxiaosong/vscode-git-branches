@@ -372,8 +372,17 @@ export function registerCommands(
 
     reg('gitBranches.openHistory', async (item?) => {
         if (!item) { return; }
-        // ref.name is already the full ref (e.g. "origin/main" for remote, "main" for local)
         const fullRef = item.ref.name ?? '';
+
+        // Prefer Git Graph if installed — it provides a richer visual experience
+        const gitGraph = vscode.extensions.getExtension('mhutchie.git-graph');
+        if (gitGraph) {
+            if (!gitGraph.isActive) { await gitGraph.activate(); }
+            await vscode.commands.executeCommand('git-graph.view', item.repo.rootUri);
+            return;
+        }
+
+        // Fallback: git log in an integrated terminal
         const terminal = vscode.window.createTerminal({
             name: `History: ${fullRef}`,
             cwd: item.repo.rootUri.fsPath,
