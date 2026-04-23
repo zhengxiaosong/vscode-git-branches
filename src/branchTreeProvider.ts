@@ -156,15 +156,24 @@ export class BranchesProvider extends AbstractProvider {
     }
 
     private async getLocalBranches(repo: Repository): Promise<BranchItem[]> {
-        const head = repo.state.HEAD?.name;
+        const head = repo.state.HEAD;
+        const headName = head?.name;
         const branches = await repo.getBranches({ remote: false });
         return branches
             .sort((a, b) => {
-                if (a.name === head) { return -1; }
-                if (b.name === head) { return 1; }
+                if (a.name === headName) { return -1; }
+                if (b.name === headName) { return 1; }
                 return (a.name ?? '').localeCompare(b.name ?? '');
             })
-            .map(r => new BranchItem(r, repo, 'localBranch'));
+            .map(r => {
+                // repo.state.HEAD has reliable ahead/behind (used by the status bar);
+                // getBranches() may return undefined for these fields on the HEAD branch.
+                if (r.name === headName && head) {
+                    const enriched: Branch = { ...r, ahead: head.ahead, behind: head.behind };
+                    return new BranchItem(enriched, repo, 'localBranch');
+                }
+                return new BranchItem(r, repo, 'localBranch');
+            });
     }
 
     private async getRemoteGroups(repo: Repository): Promise<RemoteGroupItem[]> {
