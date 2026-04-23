@@ -169,25 +169,35 @@ export class BranchesProvider extends AbstractProvider {
 
     private async getRemoteGroups(repo: Repository): Promise<RemoteGroupItem[]> {
         const branches = await repo.getBranches({ remote: true });
-        const filtered = branches.filter(b => !isHeadRef(b));
+        const knownRemotes = repo.state.remotes.map(r => r.name);
+
+        // Only keep branches attributable to a known remote — prevents branch name
+        // prefixes (e.g. "feature/") from being misidentified as phantom remotes.
+        const filtered = branches.filter(b => {
+            if (isHeadRef(b)) { return false; }
+            if (b.remote) { return true; }
+            return knownRemotes.some(r => (b.name ?? '').startsWith(r + '/'));
+        });
         this.remoteCache.set(repo, filtered);
 
-        const remoteNames = repo.state.remotes.map(r => r.name);
+        const seen = new Set<string>();
         for (const b of filtered) {
-            const r = inferRemote(b, remoteNames);
-            if (r && !remoteNames.includes(r)) { remoteNames.push(r); }
+            const remote = b.remote ?? knownRemotes.find(r => (b.name ?? '').startsWith(r + '/'));
+            if (remote) { seen.add(remote); }
         }
-        return remoteNames
-            .filter(name => filtered.some(b => inferRemote(b, remoteNames) === name))
+        return knownRemotes
+            .filter(r => seen.has(r))
             .map(name => new RemoteGroupItem(name, repo));
     }
 
     private async getRemoteBranches(repo: Repository, remoteName: string): Promise<BranchItem[]> {
         const cached = this.remoteCache.get(repo)
             ?? (await repo.getBranches({ remote: true })).filter(b => !isHeadRef(b));
-        const allRemotes = repo.state.remotes.map(r => r.name);
         return cached
-            .filter(b => inferRemote(b, allRemotes) === remoteName)
+            .filter(b => {
+                if (b.remote) { return b.remote === remoteName; }
+                return (b.name ?? '').startsWith(remoteName + '/');
+            })
             .sort((a, b) => shortName(a, remoteName).localeCompare(shortName(b, remoteName)))
             .map(b => new BranchItem(b, repo, 'remoteBranch', shortName(b, remoteName)));
     }
