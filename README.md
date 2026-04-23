@@ -38,7 +38,8 @@ Displays local and remote branches together in a single tree, grouped by scope:
 | Set Upstream | Set the tracking remote branch |
 | Rename Branch | Rename in-place |
 | Delete Branch | Delete locally (offers force-delete if not fully merged) |
-| View History | Open `git log` in a terminal |
+| Update Branch | Pull latest changes from upstream (`git pull` for current branch, fast-forward for others) |
+| View History | Open branch history (see [Git Graph integration](#git-graph-integration)) |
 
 #### Remote branch actions (right-click)
 
@@ -48,7 +49,7 @@ Displays local and remote branches together in a single tree, grouped by scope:
 | Fetch | Fetch the latest state of this branch |
 | Cherry-pick Tip Commit | Cherry-pick the latest commit |
 | Delete Remote Branch | Delete on the remote (offers prune if already gone) |
-| View History | Open `git log` in a terminal |
+| View History | Open branch history (see [Git Graph integration](#git-graph-integration)) |
 
 #### Local group actions (right-click on "Local")
 
@@ -92,6 +93,22 @@ Lists all local tags alphabetically.
 | Create Branch | Create a new branch from current HEAD |
 | Refresh | Refresh the branches list |
 
+### Ahead / Behind indicator
+
+Local branches with a configured upstream show a sync status next to their name:
+
+| Indicator | Meaning |
+|-----------|---------|
+| `↑2` | 2 commits ahead of remote |
+| `↓3` | 3 commits behind remote |
+| `↑1 ↓2` | Diverged — both sides have unique commits |
+
+The current branch uses live data from VS Code's git state (same source as the status bar). Other branches update after a fetch + refresh.
+
+### Git Graph integration
+
+**View History** opens branch history in [Git Graph](https://marketplace.visualstudio.com/items?itemName=mhutchie.git-graph) if it is installed, providing a rich visual commit graph. Without Git Graph the history is shown as `git log --graph` output in an integrated terminal.
+
 ### Multi-root workspace support
 
 When multiple git repositories are open, branches and tags are grouped under a repository node.
@@ -101,6 +118,7 @@ When multiple git repositories are open, branches and tags are grouped under a r
 - VS Code `1.85.0` or later
 - The built-in **Git** extension must be enabled
 - Git installed and accessible (uses the path configured in `git.path`)
+- (Optional) [Git Graph](https://marketplace.visualstudio.com/items?itemName=mhutchie.git-graph) for graphical branch history
 
 ## Installation
 
