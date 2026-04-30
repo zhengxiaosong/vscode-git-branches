@@ -89,24 +89,39 @@ export function registerCommands(
 
     reg('gitBranches.update', async (item?) => {
         if (!item) { return; }
-        const branch = item.ref as any;
-        const upstream = branch.upstream as { name: string; remote: string } | undefined;
-        if (!upstream) {
+        const isCurrent = item.repo.state.HEAD?.name === item.ref.name;
+
+        if (isCurrent) {
+            // Current branch: repo.state.HEAD.upstream is always reliable
+            if (!item.repo.state.HEAD?.upstream) {
+                vscode.window.showErrorMessage(`"${item.ref.name}" has no upstream configured. Use Set Upstream first.`);
+                return;
+            }
+            await withProgress(`Updating ${item.ref.name}...`, () => item.repo.pull());
+            return;
+        }
+
+        // Non-current branch: getBranches() may not populate upstream in all VS Code versions,
+        // so resolve it directly from git as a reliable fallback.
+        let upstreamRef: string;
+        try {
+            const { stdout } = await execFileAsync(
+                getGitPath(),
+                ['rev-parse', '--abbrev-ref', `${item.ref.name}@{upstream}`],
+                { cwd: item.repo.rootUri.fsPath }
+            );
+            upstreamRef = stdout.trim(); // e.g. "origin/feature-3.0.0"
+        } catch {
             vscode.window.showErrorMessage(`"${item.ref.name}" has no upstream configured. Use Set Upstream first.`);
             return;
         }
-        const isCurrent = item.repo.state.HEAD?.name === item.ref.name;
-        if (isCurrent) {
-            // Current branch: git pull (respects pull.rebase config)
-            await withProgress(`Updating ${item.ref.name}...`, () =>
-                item.repo.pull()
-            );
-        } else {
-            // Non-current branch: fast-forward via git fetch remote src:dst
-            await withProgress(`Updating ${item.ref.name}...`, () =>
-                runGit(item.repo, ['fetch', upstream.remote, `${upstream.name}:${item.ref.name}`])
-            );
-        }
+
+        const slashIdx = upstreamRef.indexOf('/');
+        const remote = upstreamRef.slice(0, slashIdx);
+        const remoteBranch = upstreamRef.slice(slashIdx + 1);
+        await withProgress(`Updating ${item.ref.name}...`, () =>
+            runGit(item.repo, ['fetch', remote, `${remoteBranch}:${item.ref.name}`])
+        );
     });
 
     reg('gitBranches.checkout', async (item?) => {
