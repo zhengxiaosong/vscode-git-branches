@@ -1,7 +1,17 @@
 import * as vscode from 'vscode';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { Branch, GitApi, Ref, Repository } from './gitApi';
 
+const execFileAsync = promisify(execFile);
+
+function getGitPath(): string {
+    return vscode.workspace.getConfiguration('git').get<string>('path') || 'git';
+}
+
 // ---- Tree node types ----
+
+type TagSyncStatus = 'synced' | 'unpublished' | 'conflict';
 
 export class BranchItem extends vscode.TreeItem {
     constructor(
@@ -9,6 +19,7 @@ export class BranchItem extends vscode.TreeItem {
         public readonly repo: Repository,
         itemContextValue: 'localBranch' | 'remoteBranch' | 'tag',
         displayLabel?: string,
+        tagSyncStatus?: TagSyncStatus,
     ) {
         const label = displayLabel ?? ref.name ?? '(unknown)';
         super(label, vscode.TreeItemCollapsibleState.None);
@@ -33,7 +44,17 @@ export class BranchItem extends vscode.TreeItem {
             this.iconPath = new vscode.ThemeIcon('star-full', new vscode.ThemeColor('charts.yellow'));
             this.description = syncDesc ? `current ${syncDesc}` : 'current';
         } else if (itemContextValue === 'tag') {
-            this.iconPath = new vscode.ThemeIcon('tag');
+            if (tagSyncStatus === 'unpublished') {
+                this.iconPath = new vscode.ThemeIcon('tag', new vscode.ThemeColor('charts.yellow'));
+                this.description = '↑ not pushed';
+                this.tooltip = `${ref.name} — local only, not pushed to remote`;
+            } else if (tagSyncStatus === 'conflict') {
+                this.iconPath = new vscode.ThemeIcon('tag', new vscode.ThemeColor('errorForeground'));
+                this.description = '⚠ conflict';
+                this.tooltip = `${ref.name} — conflicts with remote (different commits)`;
+            } else {
+                this.iconPath = new vscode.ThemeIcon('tag');
+            }
         } else {
             this.iconPath = new vscode.ThemeIcon('git-branch');
             if (syncDesc) { this.description = syncDesc; }
@@ -86,6 +107,9 @@ abstract class AbstractProvider implements vscode.TreeDataProvider<TreeNode>, vs
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     invalidate(): void { this._onDidChangeTreeData.fire(); }
+
+    // Used by subclasses to trigger a re-render without recursively triggering their invalidate logic
+    protected fireChange(): void { this._onDidChangeTreeData.fire(); }
 
     private repoListeners = new Map<Repository, vscode.Disposable>();
     private subscriptions: vscode.Disposable[] = [];
@@ -221,9 +245,79 @@ export class BranchesProvider extends AbstractProvider {
     }
 }
 
-// ---- Tags provider (unchanged) ----
+// ---- Tags provider with remote sync status ----
+
+type RemoteSyncData = {
+    // tag name → peeled commit hash (annotated tags resolve to their underlying commit)
+    localCommits: Map<string, string>;
+    // null = ls-remote failed (no network / no remote); key missing = tag not on remote
+    remoteCommits: Map<string, string> | null;
+};
 
 export class TagProvider extends AbstractProvider {
+    private syncCache = new Map<Repository, RemoteSyncData>();
+    private fetching = new Set<Repository>();
+
+    override invalidate(): void {
+        this.syncCache.clear();
+        super.invalidate();
+        // Kick off background sync-status refresh; fireChange() re-renders when done
+        for (const repo of this.gitApi.repositories) {
+            this.refreshTagSync(repo);
+        }
+    }
+
+    private async refreshTagSync(repo: Repository): Promise<void> {
+        if (this.fetching.has(repo)) { return; }
+        this.fetching.add(repo);
+        try {
+            // Resolve local tag → peeled commit. %(*objectname) is the dereferenced commit for
+            // annotated tags (empty for lightweight tags); %(objectname) is the tag object itself.
+            const localCommits = new Map<string, string>();
+            try {
+                const { stdout } = await execFileAsync(
+                    getGitPath(),
+                    ['for-each-ref', '--format=%(refname:short)|%(*objectname)|%(objectname)', 'refs/tags/'],
+                    { cwd: repo.rootUri.fsPath }
+                );
+                for (const line of stdout.trim().split('\n').filter(Boolean)) {
+                    const [name, peeled, obj] = line.split('|');
+                    localCommits.set(name, peeled || obj); // peeled wins for annotated tags
+                }
+            } catch { /* no tags or git unavailable */ }
+
+            // Fetch remote tag commits via ls-remote (network call; may fail).
+            let remoteCommits: Map<string, string> | null = null;
+            const remoteName = repo.state.remotes[0]?.name;
+            if (remoteName) {
+                try {
+                    const { stdout } = await execFileAsync(
+                        getGitPath(),
+                        ['ls-remote', '--tags', remoteName],
+                        { cwd: repo.rootUri.fsPath }
+                    );
+                    remoteCommits = new Map<string, string>();
+                    for (const line of stdout.trim().split('\n').filter(Boolean)) {
+                        const [commit, ref] = line.split('\t');
+                        if (!ref) { continue; }
+                        if (ref.endsWith('^{}')) {
+                            // Peeled annotated tag — use as the authoritative commit
+                            remoteCommits.set(ref.slice('refs/tags/'.length, -3), commit);
+                        } else {
+                            const name = ref.slice('refs/tags/'.length);
+                            if (!remoteCommits.has(name)) { remoteCommits.set(name, commit); }
+                        }
+                    }
+                } catch { /* network unavailable — remoteCommits stays null */ }
+            }
+
+            this.syncCache.set(repo, { localCommits, remoteCommits });
+            this.fireChange(); // re-render with sync status, without re-triggering invalidate
+        } finally {
+            this.fetching.delete(repo);
+        }
+    }
+
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
         const repos = this.gitApi.repositories;
         if (!element) {
@@ -239,9 +333,28 @@ export class TagProvider extends AbstractProvider {
 
     private async getTagsForRepo(repo: Repository): Promise<BranchItem[]> {
         const refs = await repo.getRefs({ pattern: 'refs/tags/*' });
+        const sync = this.syncCache.get(repo);
+
         return refs
             .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-            .map(r => new BranchItem(r, repo, 'tag'));
+            .map(r => {
+                let syncStatus: TagSyncStatus | undefined;
+                if (sync) {
+                    const localCommit  = sync.localCommits.get(r.name ?? '');
+                    const remoteCommit = sync.remoteCommits?.get(r.name ?? '');
+
+                    if (sync.remoteCommits === null) {
+                        syncStatus = undefined; // remote unreachable — no indicator
+                    } else if (remoteCommit === undefined) {
+                        syncStatus = 'unpublished';
+                    } else if (localCommit === remoteCommit) {
+                        syncStatus = 'synced';
+                    } else {
+                        syncStatus = 'conflict';
+                    }
+                }
+                return new BranchItem(r, repo, 'tag', undefined, syncStatus);
+            });
     }
 }
 
