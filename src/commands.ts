@@ -83,20 +83,23 @@ function escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+const ICON_BRANCH = '<svg class="ref-icon" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M11.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5zm-2.25.75a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.49 2.49 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25zM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5zM3.5 3.25a.75.75 0 1 1 1.5 0 .75.75 0 0 1-1.5 0z"/></svg>';
+const ICON_TAG = '<svg class="ref-icon" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M1 2.75A1.75 1.75 0 0 1 2.75 1h5.586c.464 0 .909.184 1.237.513l6.25 6.25a1.75 1.75 0 0 1 0 2.474l-5.586 5.586a1.75 1.75 0 0 1-2.474 0l-6.25-6.25A1.75 1.75 0 0 1 1 8.336V2.75zM5 5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg>';
+
 function renderRefs(refs: string): string {
     if (!refs.trim()) { return ''; }
     return refs.split(',').map(r => r.trim()).filter(Boolean).map(ref => {
         if (ref.startsWith('HEAD ->')) {
             const branch = escapeHtml(ref.slice('HEAD -> '.length));
-            return `<span class="ref-head">HEAD</span><span class="ref-arrow"> → </span><span class="ref-local">${branch}</span>`;
+            return `<span class="ref-pill ref-head">${ICON_BRANCH}<span>${branch}</span></span>`;
         }
-        if (ref === 'HEAD') { return `<span class="ref-head">HEAD</span>`; }
+        if (ref === 'HEAD') { return `<span class="ref-pill ref-head">${ICON_BRANCH}<span>HEAD</span></span>`; }
         if (ref.startsWith('tag: ')) {
-            return `<span class="ref-tag">${escapeHtml(ref.slice(5))}</span>`;
+            return `<span class="ref-pill ref-tag">${ICON_TAG}<span>${escapeHtml(ref.slice(5))}</span></span>`;
         }
-        if (ref.includes('/')) { return `<span class="ref-remote">${escapeHtml(ref)}</span>`; }
-        return `<span class="ref-local">${escapeHtml(ref)}</span>`;
-    }).join('<span class="ref-sep"> · </span>');
+        if (ref.includes('/')) { return `<span class="ref-pill ref-remote">${ICON_BRANCH}<span>${escapeHtml(ref)}</span></span>`; }
+        return `<span class="ref-pill ref-local">${ICON_BRANCH}<span>${escapeHtml(ref)}</span></span>`;
+    }).join('');
 }
 
 // ---- SVG graph lane renderer ----
@@ -237,7 +240,7 @@ function buildHistoryHtml(commits: CommitData[], ref: string): string {
         return `<tr class="commit-row">
   <td class="col-graph">${renderRowSvg(row, svgWidth)}</td>
   <td class="col-hash">${escapeHtml(c.display)}</td>
-  <td class="col-refs">${renderRefs(c.refs)}</td>
+  <td class="col-refs"${c.refs.trim() ? ` title="${escapeHtml(c.refs)}"` : ''}><div class="refs-inner">${renderRefs(c.refs)}</div></td>
   <td class="col-subject" title="${escapeHtml(c.subject)}">${escapeHtml(c.subject)}</td>
   <td class="col-date">${escapeHtml(c.date)}</td>
   <td class="col-author">${escapeHtml(c.author)}</td>
@@ -275,20 +278,30 @@ function buildHistoryHtml(commits: CommitData[], ref: string): string {
     letter-spacing: 0.06em; text-transform: uppercase;
     white-space: nowrap;
   }
-  td { padding: 1px 10px; white-space: nowrap; vertical-align: middle; }
+  td { padding: 2px 10px; white-space: nowrap; vertical-align: middle; }
   tr.commit-row:hover td { background: var(--vscode-list-hoverBackground); }
   .col-graph  { padding-left: 6px; padding-right: 4px; }
   .col-hash   { color: #e5c07b; font-weight: bold; min-width: 7ch; }
-  .col-refs   { min-width: 180px; }
-  .col-subject{ max-width: 480px; overflow: hidden; text-overflow: ellipsis; }
+  .col-refs   { min-width: 80px; max-width: 220px; }
+  .col-refs .refs-inner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .col-subject{ max-width: 560px; overflow: hidden; text-overflow: ellipsis; }
   .col-date   { color: var(--vscode-descriptionForeground); min-width: 100px; text-align: right; padding-right: 14px; }
   .col-author { color: #61afef; min-width: 100px; }
-  .ref-head   { color: #56b6c2; font-weight: bold; }
-  .ref-arrow  { color: var(--vscode-descriptionForeground); }
-  .ref-local  { color: #98c379; }
-  .ref-remote { color: #e06c75; }
-  .ref-tag    { display: inline-block; background: rgba(229,192,123,.15); color: #e5c07b; border: 1px solid rgba(229,192,123,.35); border-radius: 3px; padding: 0 5px; font-size: 11px; line-height: 1.7; vertical-align: middle; }
-  .ref-sep    { color: var(--vscode-descriptionForeground); }
+  .ref-pill {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 0 5px; margin-right: 3px;
+    border-radius: 8px;
+    font-size: 10px; line-height: 14px; height: 14px;
+    vertical-align: middle;
+    max-width: 110px;
+    border: 1px solid transparent;
+  }
+  .ref-pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ref-icon { flex: 0 0 auto; opacity: 0.85; }
+  .ref-head   { background: rgba(86,182,194,.18);  color: #56b6c2; border-color: rgba(86,182,194,.35); font-weight: 600; }
+  .ref-local  { background: rgba(152,195,121,.18); color: #98c379; border-color: rgba(152,195,121,.30); }
+  .ref-remote { background: rgba(224,108,117,.16); color: #e06c75; border-color: rgba(224,108,117,.28); }
+  .ref-tag    { background: rgba(229,192,123,.18); color: #e5c07b; border-color: rgba(229,192,123,.35); }
 </style>
 </head>
 <body>
