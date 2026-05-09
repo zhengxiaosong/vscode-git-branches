@@ -77,6 +77,238 @@ async function withProgress<T>(title: string, fn: () => Promise<T>): Promise<T |
     });
 }
 
+// ---- History webview helpers ----
+
+function escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderRefs(refs: string): string {
+    if (!refs.trim()) { return ''; }
+    return refs.split(',').map(r => r.trim()).filter(Boolean).map(ref => {
+        if (ref.startsWith('HEAD ->')) {
+            const branch = escapeHtml(ref.slice('HEAD -> '.length));
+            return `<span class="ref-head">HEAD</span><span class="ref-arrow"> → </span><span class="ref-local">${branch}</span>`;
+        }
+        if (ref === 'HEAD') { return `<span class="ref-head">HEAD</span>`; }
+        if (ref.startsWith('tag: ')) {
+            return `<span class="ref-tag">${escapeHtml(ref.slice(5))}</span>`;
+        }
+        if (ref.includes('/')) { return `<span class="ref-remote">${escapeHtml(ref)}</span>`; }
+        return `<span class="ref-local">${escapeHtml(ref)}</span>`;
+    }).join('<span class="ref-sep"> · </span>');
+}
+
+// ---- SVG graph lane renderer ----
+
+const GRAPH_COLORS = ['#61afef', '#98c379', '#e5c07b', '#e06c75', '#c678dd', '#56b6c2', '#d19a66'];
+const LANE_W = 14;
+const ROW_H  = 22;
+const DOT_R  = 3.5;
+
+interface CommitData {
+    hash: string;
+    display: string;
+    parents: string[];
+    refs: string;
+    subject: string;
+    date: string;
+    author: string;
+}
+
+interface RowLayout {
+    col: number;
+    color: string;
+    colColors: string[];
+    topLanes: (string | null)[];
+    botLanes: (string | null)[];
+    firstParentConvergesTo: number | null;
+    mergeParents: { targetCol: number; color: string }[];
+}
+
+function computeLayout(commits: CommitData[]): RowLayout[] {
+    const lanes: (string | null)[] = [];
+    const laneColors: string[] = [];
+    let nextColor = 0;
+
+    return commits.map(commit => {
+        // Find or allocate a lane for this commit
+        let col = lanes.indexOf(commit.hash);
+        if (col === -1) {
+            const free = lanes.indexOf(null);
+            if (free !== -1) {
+                col = free;
+                laneColors[col] = GRAPH_COLORS[nextColor++ % GRAPH_COLORS.length];
+            } else {
+                col = lanes.length;
+                lanes.push(null);
+                laneColors.push(GRAPH_COLORS[nextColor++ % GRAPH_COLORS.length]);
+            }
+        }
+        const color = laneColors[col];
+
+        const topLanes: (string | null)[] = lanes.slice();
+        while (topLanes.length <= col) { topLanes.push(null); }
+
+        let firstParentConvergesTo: number | null = null;
+        const mergeParents: { targetCol: number; color: string }[] = [];
+
+        if (commit.parents.length === 0) {
+            lanes[col] = null;
+        } else {
+            const p0Lane = lanes.indexOf(commit.parents[0]);
+            if (p0Lane === -1 || p0Lane === col) {
+                lanes[col] = commit.parents[0];
+            } else {
+                // First parent already tracked by another lane — converge
+                lanes[col] = null;
+                firstParentConvergesTo = p0Lane;
+            }
+            for (const p of commit.parents.slice(1)) {
+                const pLane = lanes.indexOf(p);
+                if (pLane !== -1) {
+                    mergeParents.push({ targetCol: pLane, color: laneColors[pLane] ?? color });
+                } else {
+                    let newCol = lanes.indexOf(null);
+                    if (newCol === -1) { newCol = lanes.length; lanes.push(null); }
+                    if (!laneColors[newCol]) { laneColors[newCol] = GRAPH_COLORS[nextColor++ % GRAPH_COLORS.length]; }
+                    lanes[newCol] = p;
+                    mergeParents.push({ targetCol: newCol, color: laneColors[newCol] });
+                }
+            }
+        }
+
+        const botLanes: (string | null)[] = lanes.slice();
+        while (botLanes.length <= col) { botLanes.push(null); }
+
+        return { col, color, colColors: laneColors.slice(), topLanes, botLanes, firstParentConvergesTo, mergeParents };
+    });
+}
+
+function renderRowSvg(row: RowLayout, svgWidth: number): string {
+    const cx = row.col * LANE_W + LANE_W / 2;
+    const cy = ROW_H / 2;
+    const els: string[] = [];
+    const maxJ = Math.max(row.topLanes.length, row.botLanes.length);
+
+    // Pass-through verticals for other lanes
+    for (let j = 0; j < maxJ; j++) {
+        if (j === row.col) { continue; }
+        const x   = j * LANE_W + LANE_W / 2;
+        const top = j < row.topLanes.length ? row.topLanes[j] : null;
+        const bot = j < row.botLanes.length ? row.botLanes[j] : null;
+        const c   = (j < row.colColors.length ? row.colColors[j] : null) ?? GRAPH_COLORS[j % GRAPH_COLORS.length];
+        if (top !== null && bot !== null) {
+            els.push(`<line x1="${x}" y1="0" x2="${x}" y2="${ROW_H}" stroke="${c}" stroke-width="1.5" stroke-linecap="round"/>`);
+        }
+    }
+
+    // Incoming line from above (to commit dot)
+    if (row.topLanes[row.col] !== null) {
+        els.push(`<line x1="${cx}" y1="0" x2="${cx}" y2="${cy}" stroke="${row.color}" stroke-width="1.5" stroke-linecap="round"/>`);
+    }
+    // Outgoing line below (first parent, same lane)
+    if (row.botLanes[row.col] !== null) {
+        els.push(`<line x1="${cx}" y1="${cy}" x2="${cx}" y2="${ROW_H}" stroke="${row.color}" stroke-width="1.5" stroke-linecap="round"/>`);
+    }
+    // First parent converges to another lane
+    if (row.firstParentConvergesTo !== null) {
+        const tx = row.firstParentConvergesTo * LANE_W + LANE_W / 2;
+        els.push(`<path d="M ${cx},${cy} C ${cx},${ROW_H} ${tx},${cy} ${tx},${ROW_H}" fill="none" stroke="${row.color}" stroke-width="1.5" stroke-linecap="round"/>`);
+    }
+    // Merge parents — bezier curves from dot to each parent lane bottom
+    for (const mp of row.mergeParents) {
+        const tx = mp.targetCol * LANE_W + LANE_W / 2;
+        els.push(`<path d="M ${cx},${cy} C ${cx},${ROW_H} ${tx},${cy} ${tx},${ROW_H}" fill="none" stroke="${mp.color}" stroke-width="1.5" stroke-linecap="round"/>`);
+    }
+    // Commit dot (drawn last, appears on top)
+    els.push(`<circle cx="${cx}" cy="${cy}" r="${DOT_R}" fill="${row.color}" stroke="var(--vscode-editor-background,#1e1e1e)" stroke-width="1.5"/>`);
+
+    return `<svg width="${svgWidth}" height="${ROW_H}" style="display:block;overflow:visible" xmlns="http://www.w3.org/2000/svg">${els.join('')}</svg>`;
+}
+
+function buildHistoryHtml(commits: CommitData[], ref: string): string {
+    const layouts = computeLayout(commits);
+    const totalCols = Math.max(1, ...layouts.map(r => Math.max(r.topLanes.length, r.botLanes.length)));
+    const svgWidth = totalCols * LANE_W;
+
+    const rows = commits.map((c, i) => {
+        const row = layouts[i];
+        return `<tr class="commit-row">
+  <td class="col-graph">${renderRowSvg(row, svgWidth)}</td>
+  <td class="col-hash">${escapeHtml(c.display)}</td>
+  <td class="col-refs">${renderRefs(c.refs)}</td>
+  <td class="col-subject" title="${escapeHtml(c.subject)}">${escapeHtml(c.subject)}</td>
+  <td class="col-date">${escapeHtml(c.date)}</td>
+  <td class="col-author">${escapeHtml(c.author)}</td>
+</tr>`;
+    }).join('');
+
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0; overflow-x: auto;
+    font-family: var(--vscode-editor-font-family, 'SF Mono', Menlo, Consolas, monospace);
+    font-size: var(--vscode-editor-font-size, 13px);
+    color: var(--vscode-foreground);
+    background: var(--vscode-editor-background);
+  }
+  .toolbar {
+    position: sticky; top: 0; z-index: 10;
+    padding: 8px 14px 7px;
+    background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+    border-bottom: 1px solid var(--vscode-panel-border);
+    font-size: 12px; font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+    letter-spacing: 0.03em;
+  }
+  .toolbar span { color: var(--vscode-foreground); }
+  table { border-collapse: collapse; width: max-content; min-width: 100%; }
+  thead th {
+    position: sticky; top: 37px; z-index: 9;
+    background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+    border-bottom: 1px solid var(--vscode-panel-border);
+    padding: 4px 10px;
+    text-align: left; font-size: 11px; font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    white-space: nowrap;
+  }
+  td { padding: 1px 10px; white-space: nowrap; vertical-align: middle; }
+  tr.commit-row:hover td { background: var(--vscode-list-hoverBackground); }
+  .col-graph  { padding-left: 6px; padding-right: 4px; }
+  .col-hash   { color: #e5c07b; font-weight: bold; min-width: 7ch; }
+  .col-refs   { min-width: 180px; }
+  .col-subject{ max-width: 480px; overflow: hidden; text-overflow: ellipsis; }
+  .col-date   { color: var(--vscode-descriptionForeground); min-width: 100px; text-align: right; padding-right: 14px; }
+  .col-author { color: #61afef; min-width: 100px; }
+  .ref-head   { color: #56b6c2; font-weight: bold; }
+  .ref-arrow  { color: var(--vscode-descriptionForeground); }
+  .ref-local  { color: #98c379; }
+  .ref-remote { color: #e06c75; }
+  .ref-tag    { display: inline-block; background: rgba(229,192,123,.15); color: #e5c07b; border: 1px solid rgba(229,192,123,.35); border-radius: 3px; padding: 0 5px; font-size: 11px; line-height: 1.7; vertical-align: middle; }
+  .ref-sep    { color: var(--vscode-descriptionForeground); }
+</style>
+</head>
+<body>
+<div class="toolbar">History · <span>${escapeHtml(ref)}</span></div>
+<table>
+  <thead>
+    <tr>
+      <th style="min-width:${svgWidth + 16}px"></th>
+      <th>Hash</th>
+      <th>Refs</th>
+      <th>Message</th>
+      <th style="text-align:right;padding-right:14px">Date</th>
+      <th>Author</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+</body></html>`;
+}
+
 export function registerCommands(
     context: vscode.ExtensionContext,
     gitApi: GitApi,
@@ -586,29 +818,37 @@ export function registerCommands(
         if (!item) { return; }
         const fullRef = item.ref.name ?? '';
 
-        // Prefer Git Graph if installed — it provides a richer visual experience.
-        // Pass refInput so Git Graph navigates directly to this branch.
-        const gitGraph = vscode.extensions.getExtension('mhutchie.git-graph');
-        if (gitGraph) {
-            if (!gitGraph.isActive) { await gitGraph.activate(); }
-            await vscode.commands.executeCommand('git-graph.view', {
-                rootPath: item.repo.rootUri.fsPath,
-                refInput: fullRef,
-            });
-            return;
-        }
-
-        // Fallback: git log in an integrated terminal
-        const terminal = vscode.window.createTerminal({
-            name: `History: ${fullRef}`,
-            cwd: item.repo.rootUri.fsPath,
-            isTransient: true,
-        });
-        // Single-quote the ref to prevent shell interpretation; git refnames cannot contain single quotes
-        terminal.sendText(
-            `${getGitPath()} log --graph --oneline --decorate --color=always '${fullRef}'`
+        const panel = vscode.window.createWebviewPanel(
+            'gitBranchHistory',
+            `History: ${fullRef}`,
+            vscode.ViewColumn.Active,
+            { enableScripts: false, retainContextWhenHidden: true }
         );
-        terminal.show();
+
+        const SEP = '\x01';
+        try {
+            const { stdout } = await execFileAsync(getGitPath(), [
+                'log', '--topo-order',
+                `--pretty=format:%H${SEP}%h${SEP}%P${SEP}%D${SEP}%s${SEP}%cr${SEP}%an`,
+                fullRef,
+            ], { cwd: item.repo.rootUri.fsPath });
+            const commits: CommitData[] = stdout.trim().split('\n').filter(Boolean).map(line => {
+                const parts = line.split(SEP);
+                return {
+                    hash:    parts[0] ?? '',
+                    display: parts[1] ?? '',
+                    parents: (parts[2] ?? '').trim().split(/\s+/).filter(Boolean),
+                    refs:    parts[3] ?? '',
+                    subject: parts[4] ?? '',
+                    date:    parts[5] ?? '',
+                    author:  parts[6] ?? '',
+                };
+            });
+            panel.webview.html = buildHistoryHtml(commits, fullRef);
+        } catch (e: any) {
+            vscode.window.showErrorMessage(String(e.stderr ?? e.message ?? e).trim());
+            panel.dispose();
+        }
     });
 
     // ---- Cherry-pick ----
