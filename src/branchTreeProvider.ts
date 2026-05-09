@@ -82,8 +82,10 @@ type TreeNode = BranchItem | LocalGroupItem | RemoteSectionItem | RemoteGroupIte
 // ---- Abstract base with repo lifecycle ----
 
 abstract class AbstractProvider implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable {
-    readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
+    private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    invalidate(): void { this._onDidChangeTreeData.fire(); }
 
     private repoListeners = new Map<Repository, vscode.Disposable>();
     private subscriptions: vscode.Disposable[] = [];
@@ -99,7 +101,11 @@ abstract class AbstractProvider implements vscode.TreeDataProvider<TreeNode>, vs
     }
 
     private attachRepo(repo: Repository): void {
-        const d = repo.state.onDidChange(() => this._onDidChangeTreeData.fire());
+        let debounce: ReturnType<typeof setTimeout> | undefined;
+        const d = repo.state.onDidChange(() => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => this._onDidChangeTreeData.fire(), 50);
+        });
         this.repoListeners.set(repo, d);
         this._onDidChangeTreeData.fire();
     }
@@ -126,7 +132,10 @@ abstract class AbstractProvider implements vscode.TreeDataProvider<TreeNode>, vs
 export class BranchesProvider extends AbstractProvider {
     private remoteCache = new Map<Repository, Ref[]>();
 
-    clearCache(): void { this.remoteCache.clear(); }
+    override invalidate(): void {
+        this.remoteCache.clear();
+        super.invalidate();
+    }
 
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
         const repos = this.gitApi.repositories;
@@ -241,17 +250,6 @@ export class TagProvider extends AbstractProvider {
 function isHeadRef(ref: Ref): boolean {
     const name = ref.name ?? '';
     return name === 'HEAD' || name.endsWith('/HEAD');
-}
-
-function inferRemote(ref: Ref, knownRemotes: string[]): string | undefined {
-    if (ref.remote) { return ref.remote; }
-    const name = ref.name ?? '';
-    const sorted = [...knownRemotes].sort((a, b) => b.length - a.length);
-    for (const r of sorted) {
-        if (name.startsWith(r + '/') || name === r) { return r; }
-    }
-    const idx = name.indexOf('/');
-    return idx !== -1 ? name.slice(0, idx) : undefined;
 }
 
 function shortName(ref: Ref, remoteName: string): string {

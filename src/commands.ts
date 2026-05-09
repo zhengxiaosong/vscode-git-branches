@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { BranchItem } from './branchTreeProvider';
-import { GitApi, Ref, Repository } from './gitApi';
+import { Branch, GitApi, Ref, Repository } from './gitApi';
 
 const execFileAsync = promisify(execFile);
 
@@ -10,11 +10,12 @@ function getGitPath(): string {
     return vscode.workspace.getConfiguration('git').get<string>('path') || 'git';
 }
 
-async function runGit(repo: Repository, args: string[]): Promise<void> {
+async function runGit(repo: Repository, args: string[]): Promise<{ stdout: string; stderr: string }> {
     const cwd = repo.rootUri.fsPath;
-    await execFileAsync(getGitPath(), args, { cwd });
+    const result = await execFileAsync(getGitPath(), args, { cwd });
     // Notify the built-in git extension to refresh its internal state
     await vscode.commands.executeCommand('git.refresh');
+    return result;
 }
 
 function parseRemoteBranch(repo: Repository, ref: Ref): { remote: string; branch: string } {
@@ -133,11 +134,32 @@ export function registerCommands(
 
     reg('gitBranches.merge', async (item?) => {
         if (!item) { return; }
-        const ok = await confirm(`Merge "${item.ref.name}" into current branch?`, 'Merge');
+
+        const strategies = [
+            { label: 'Merge', description: 'Create a merge commit', value: 'merge' as const },
+            { label: 'Squash and Merge', description: 'Squash all commits into one staged change', value: 'squash' as const },
+            { label: 'No Fast-Forward', description: 'Always create a merge commit (--no-ff)', value: 'no-ff' as const },
+        ];
+        const strategy = await vscode.window.showQuickPick(strategies, {
+            placeHolder: `Merge "${item.ref.name}" into current branch — select strategy`,
+        });
+        if (!strategy) { return; }
+
+        const ok = await confirm(`${strategy.label} "${item.ref.name}" into current branch?`, strategy.label);
         if (!ok) { return; }
-        await withProgress(`Merging ${item.ref.name}...`, () =>
-            item.repo.merge(item.ref.name!)
-        );
+
+        await withProgress(`Merging ${item.ref.name}...`, async () => {
+            if (strategy.value === 'squash') {
+                await runGit(item.repo, ['merge', '--squash', item.ref.name!]);
+                vscode.window.showInformationMessage(
+                    `"${item.ref.name}" squashed and staged. Commit to complete the merge.`
+                );
+            } else if (strategy.value === 'no-ff') {
+                await runGit(item.repo, ['merge', '--no-ff', '--no-edit', item.ref.name!]);
+            } else {
+                await item.repo.merge(item.ref.name!);
+            }
+        });
     });
 
     reg('gitBranches.rebase', async (item?) => {
@@ -150,6 +172,35 @@ export function registerCommands(
         await withProgress(`Rebasing onto ${item.ref.name}...`, () =>
             runGit(item.repo, ['rebase', item.ref.name!])
         );
+    });
+
+    reg('gitBranches.checkoutAndRebase', async (item?) => {
+        if (!item) { return; }
+        const currentBranch = item.repo.state.HEAD?.name;
+        if (!currentBranch) {
+            vscode.window.showErrorMessage('No current branch.');
+            return;
+        }
+        const ok = await confirm(
+            `Checkout "${item.ref.name}" and rebase it onto "${currentBranch}"? This rewrites history.`,
+            'Checkout and Rebase'
+        );
+        if (!ok) { return; }
+        await withProgress(`Rebasing ${item.ref.name} onto ${currentBranch}...`, async () => {
+            await item.repo.checkout(item.ref.name!);
+            try {
+                await runGit(item.repo, ['rebase', currentBranch]);
+            } catch (e: any) {
+                const msg = String(e.stderr ?? e.message ?? e);
+                if (msg.includes('conflict') || msg.includes('CONFLICT')) {
+                    vscode.window.showWarningMessage(
+                        'Rebase has conflicts. Resolve them, then run "git rebase --continue". To cancel: "git rebase --abort".'
+                    );
+                } else {
+                    throw e;
+                }
+            }
+        });
     });
 
     reg('gitBranches.rename', async (item?) => {
@@ -168,8 +219,7 @@ export function registerCommands(
     reg('gitBranches.push', async (item?) => {
         if (!item) { return; }
         // Use the branch's configured upstream remote, or ask the user
-        const upstream = (item.ref as any).upstream as { remote?: string } | undefined;
-        let remoteName = upstream?.remote;
+        let remoteName = (item.ref as Branch).upstream?.remote;
         if (!remoteName) {
             const remotes = item.repo.state.remotes;
             if (remotes.length === 0) {
@@ -232,23 +282,97 @@ export function registerCommands(
         if (!item) { return; }
         const ok = await confirm(`Delete local branch "${item.ref.name}"?`, 'Delete');
         if (!ok) { return; }
-        await withProgress(`Deleting branch ${item.ref.name}...`, async () => {
-            try {
-                await item.repo.deleteBranch(item.ref.name!, false);
-            } catch (e: any) {
-                if (String(e.stderr ?? e.message ?? e).includes('not fully merged')) {
-                    const force = await confirm(
-                        `"${item.ref.name}" is not fully merged. Force delete?`,
-                        'Force Delete'
-                    );
-                    if (force) {
-                        await item.repo.deleteBranch(item.ref.name!, true);
+        // Try a normal delete; on "not fully merged" offer force delete outside the progress toast.
+        let notFullyMerged = false;
+        await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Deleting branch ${item.ref.name}...` },
+            async () => {
+                try {
+                    await item.repo.deleteBranch(item.ref.name!, false);
+                    await _refresh?.();
+                } catch (e: any) {
+                    const msg = String(e.stderr ?? e.message ?? e);
+                    if (msg.includes('not fully merged')) {
+                        notFullyMerged = true;
+                    } else {
+                        vscode.window.showErrorMessage(msg.trim());
                     }
-                } else {
-                    throw e;
                 }
             }
+        );
+        if (notFullyMerged) {
+            const force = await confirm(
+                `"${item.ref.name}" is not fully merged. Force delete?`,
+                'Force Delete'
+            );
+            if (!force) { return; }
+            await withProgress(`Force deleting branch ${item.ref.name}...`, () =>
+                item.repo.deleteBranch(item.ref.name!, true)
+            );
+        }
+    });
+
+    reg('gitBranches.compareWithCurrent', async (item?) => {
+        if (!item) { return; }
+        const head = item.repo.state.HEAD?.name;
+        if (!head) {
+            vscode.window.showErrorMessage('No current branch.');
+            return;
+        }
+
+        let diffLines: string[];
+        try {
+            const { stdout } = await execFileAsync(
+                getGitPath(),
+                ['diff', `${head}...${item.ref.name}`, '--name-status'],
+                { cwd: item.repo.rootUri.fsPath }
+            );
+            diffLines = stdout.trim().split('\n').filter(Boolean);
+        } catch (e: any) {
+            vscode.window.showErrorMessage(String(e.stderr ?? e.message ?? e).trim());
+            return;
+        }
+
+        if (diffLines.length === 0) {
+            vscode.window.showInformationMessage(`No differences between "${head}" and "${item.ref.name}".`);
+            return;
+        }
+
+        const statusLabels: Record<string, string> = { A: 'Added', M: 'Modified', D: 'Deleted', R: 'Renamed', C: 'Copied' };
+        type FileEntry = { label: string; description: string; filePath: string; leftRef: string; rightRef: string };
+        const entries: FileEntry[] = diffLines.map(line => {
+            const parts = line.split('\t');
+            const statusCode = parts[0][0];
+            // Renames/copies: <STATUS>\t<old>\t<new> — use the new path for the right side, old path for left
+            const isRenameOrCopy = statusCode === 'R' || statusCode === 'C';
+            const leftPath = isRenameOrCopy ? parts[1] : parts[1];
+            const rightPath = isRenameOrCopy ? parts[2] : parts[1];
+            return {
+                label: rightPath,
+                description: statusLabels[statusCode] ?? parts[0],
+                filePath: rightPath,
+                leftRef: statusCode === 'A' ? '' : head,   // Added files don't exist in current
+                rightRef: statusCode === 'D' ? '' : item.ref.name!, // Deleted files don't exist in target
+            };
         });
+
+        const picked = await vscode.window.showQuickPick(entries, {
+            placeHolder: `${entries.length} file(s) changed  ·  ${head}  ↔  ${item.ref.name}`,
+            matchOnDescription: true,
+        });
+        if (!picked) { return; }
+
+        const absUri = vscode.Uri.joinPath(item.repo.rootUri, picked.filePath);
+        // For added/deleted files use an empty git URI (shows empty editor on that side)
+        const leftUri  = picked.leftRef  ? gitApi.toGitUri(absUri, picked.leftRef)  : absUri.with({ scheme: 'git', query: JSON.stringify({ path: absUri.fsPath, ref: '~' }) });
+        const rightUri = picked.rightRef ? gitApi.toGitUri(absUri, picked.rightRef) : absUri.with({ scheme: 'git', query: JSON.stringify({ path: absUri.fsPath, ref: '~' }) });
+
+        await vscode.commands.executeCommand(
+            'vscode.diff',
+            leftUri,
+            rightUri,
+            `${picked.filePath}  (${head} ↔ ${item.ref.name})`
+        );
     });
 
     // ---- Remote branch commands ----
@@ -275,6 +399,45 @@ export function registerCommands(
         );
     });
 
+    reg('gitBranches.pullIntoCurrent', async (item?) => {
+        if (!item) { return; }
+        const { remote, branch } = parseRemoteBranch(item.repo, item.ref);
+        const currentBranch = item.repo.state.HEAD?.name;
+        if (!currentBranch) {
+            vscode.window.showErrorMessage('No current branch.');
+            return;
+        }
+
+        const strategies = [
+            { label: 'Merge', description: `Fetch and merge ${remote}/${branch} into ${currentBranch}`, value: 'merge' as const },
+            { label: 'Rebase', description: `Fetch then rebase ${currentBranch} onto ${remote}/${branch}`, value: 'rebase' as const },
+        ];
+        const strategy = await vscode.window.showQuickPick(strategies, {
+            placeHolder: `Pull ${remote}/${branch} into "${currentBranch}"`,
+        });
+        if (!strategy) { return; }
+
+        await withProgress(`Pulling ${branch} into ${currentBranch}...`, async () => {
+            await runGit(item.repo, ['fetch', remote, branch]);
+            if (strategy.value === 'merge') {
+                await item.repo.merge(`${remote}/${branch}`);
+            } else {
+                try {
+                    await runGit(item.repo, ['rebase', `${remote}/${branch}`]);
+                } catch (e: any) {
+                    const msg = String(e.stderr ?? e.message ?? e);
+                    if (msg.includes('conflict') || msg.includes('CONFLICT')) {
+                        vscode.window.showWarningMessage(
+                            'Rebase has conflicts. Resolve them, then run "git rebase --continue". To cancel: "git rebase --abort".'
+                        );
+                    } else {
+                        throw e;
+                    }
+                }
+            }
+        });
+    });
+
     reg('gitBranches.deleteRemote', async (item?) => {
         if (!item) { return; }
         const { remote, branch } = parseRemoteBranch(item.repo, item.ref);
@@ -283,26 +446,36 @@ export function registerCommands(
             'Delete'
         );
         if (!ok) { return; }
-        await withProgress(`Deleting remote branch ${branch}...`, async () => {
-            try {
-                await runGit(item.repo, ['push', remote, '--delete', branch]);
-            } catch (e: any) {
-                const msg = String(e.stderr ?? e.message ?? e);
-                if (msg.includes('remote ref does not exist')) {
-                    // Branch already gone from remote; offer to prune stale local tracking ref
-                    const action = await vscode.window.showWarningMessage(
-                        `"${branch}" no longer exists on "${remote}". The local tracking ref is stale. Prune it?`,
-                        'Prune',
-                        'Cancel'
-                    );
-                    if (action === 'Prune') {
-                        await runGit(item.repo, ['fetch', remote, '--prune']);
+        // If the branch is already gone on the remote, offer to prune the stale tracking ref.
+        // The prune dialog must be shown outside withProgress to avoid overlapping UI.
+        let alreadyGone = false;
+        await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Deleting remote branch ${branch}...` },
+            async () => {
+                try {
+                    await runGit(item.repo, ['push', remote, '--delete', branch]);
+                    await _refresh?.();
+                } catch (e: any) {
+                    const msg = String(e.stderr ?? e.message ?? e);
+                    if (msg.includes('remote ref does not exist')) {
+                        alreadyGone = true;
+                    } else {
+                        vscode.window.showErrorMessage(msg.trim());
                     }
-                } else {
-                    throw e;
                 }
             }
-        });
+        );
+        if (alreadyGone) {
+            const action = await vscode.window.showWarningMessage(
+                `"${branch}" no longer exists on "${remote}". Prune stale local tracking ref?`,
+                'Prune', 'Cancel'
+            );
+            if (action === 'Prune') {
+                await withProgress(`Pruning ${remote}...`, () =>
+                    runGit(item.repo, ['fetch', remote, '--prune'])
+                );
+            }
+        }
     });
 
     // ---- Tag commands ----
@@ -352,11 +525,13 @@ export function registerCommands(
         const repos = gitApi.repositories;
         await withProgress('Fetching all remotes...', async () => {
             const results = await Promise.allSettled(repos.map(r => r.fetch()));
-            const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-            if (failed.length > 0) {
-                const msgs = failed.map(r => String(r.reason?.stderr ?? r.reason?.message ?? r.reason)).join('\n');
-                throw new Error(msgs);
-            }
+            results.forEach((r, i) => {
+                if (r.status === 'rejected') {
+                    const name = repos[i].rootUri.path.split('/').pop() ?? 'unknown';
+                    const msg = String(r.reason?.stderr ?? r.reason?.message ?? r.reason).trim();
+                    vscode.window.showErrorMessage(`Fetch failed (${name}): ${msg}`);
+                }
+            });
         });
     }));
 
@@ -411,11 +586,15 @@ export function registerCommands(
         if (!item) { return; }
         const fullRef = item.ref.name ?? '';
 
-        // Prefer Git Graph if installed — it provides a richer visual experience
+        // Prefer Git Graph if installed — it provides a richer visual experience.
+        // Pass refInput so Git Graph navigates directly to this branch.
         const gitGraph = vscode.extensions.getExtension('mhutchie.git-graph');
         if (gitGraph) {
             if (!gitGraph.isActive) { await gitGraph.activate(); }
-            await vscode.commands.executeCommand('git-graph.view', item.repo.rootUri);
+            await vscode.commands.executeCommand('git-graph.view', {
+                rootPath: item.repo.rootUri.fsPath,
+                refInput: fullRef,
+            });
             return;
         }
 
@@ -467,7 +646,10 @@ export function registerCommands(
         });
         if (message === undefined) { return; }
 
-        const args = message.trim() ? ['stash', 'push', '-m', message.trim()] : ['stash', 'push'];
+        // --include-untracked matches IntelliJ's default behaviour (new files are included)
+        const args = message.trim()
+            ? ['stash', 'push', '--include-untracked', '-m', message.trim()]
+            : ['stash', 'push', '--include-untracked'];
         await withProgress('Stashing changes...', () => runGit(repo, args));
     }));
 
@@ -476,18 +658,16 @@ export function registerCommands(
         if (repos.length === 0) { return; }
         const repo = repos.length === 1 ? repos[0] : await pickRepo(repos);
         if (!repo) { return; }
-        await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Popping latest stash...' }, async () => {
+        await withProgress('Popping latest stash...', async () => {
             try {
                 await runGit(repo, ['stash', 'pop']);
-                await _refresh?.();
             } catch (e: any) {
                 const msg = String(e.stderr ?? e.message ?? e);
                 if (msg.includes('conflict') || msg.includes('CONFLICT')) {
-                    // Stash was applied but has conflicts — this is not a fatal error
+                    // Stash was applied but has conflicts — not a fatal error, refresh and warn
                     vscode.window.showWarningMessage('Stash applied with conflicts. Resolve conflicts before continuing.');
-                    await _refresh?.();
                 } else {
-                    vscode.window.showErrorMessage(msg.trim());
+                    throw e;
                 }
             }
         });
@@ -513,17 +693,15 @@ export function registerCommands(
         const picked = await vscode.window.showQuickPick(stashes.map(s => s.label), { placeHolder: 'Select stash to apply' });
         if (!picked) { return; }
         const idx = stashes.find(s => s.label === picked)?.index ?? 0;
-        await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Applying stash@{${idx}}...` }, async () => {
+        await withProgress(`Applying stash@{${idx}}...`, async () => {
             try {
                 await runGit(repo, ['stash', 'apply', `stash@{${idx}}`]);
-                await _refresh?.();
             } catch (e: any) {
                 const msg = String(e.stderr ?? e.message ?? e);
                 if (msg.includes('conflict') || msg.includes('CONFLICT')) {
                     vscode.window.showWarningMessage('Stash applied with conflicts. Resolve conflicts before continuing.');
-                    await _refresh?.();
                 } else {
-                    vscode.window.showErrorMessage(msg.trim());
+                    throw e;
                 }
             }
         });

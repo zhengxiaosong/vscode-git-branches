@@ -60,6 +60,7 @@ export interface GitApi {
     readonly repositories: Repository[];
     readonly onDidOpenRepository: vscode.Event<Repository>;
     readonly onDidCloseRepository: vscode.Event<Repository>;
+    toGitUri(uri: vscode.Uri, ref: string): vscode.Uri;
 }
 
 export function getGitApi(): GitApi | undefined {

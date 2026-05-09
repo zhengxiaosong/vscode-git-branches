@@ -26,10 +26,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const refresh = async () => {
         await vscode.commands.executeCommand('git.refresh');
+        // git.refresh is fire-and-forget internally; wait for the built-in extension
+        // to finish updating its state before we re-query branches/refs.
         await new Promise(r => setTimeout(r, 500));
-        branchesProvider.clearCache();
-        branchesProvider._onDidChangeTreeData.fire();
-        tagProvider._onDidChangeTreeData.fire();
+        branchesProvider.invalidate();
+        tagProvider.invalidate();
     };
 
     registerCommands(context, gitApi, refresh);

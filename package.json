@@ -30,19 +30,22 @@
       ]
     },
     "commands": [
-      { "command": "gitBranches.update",          "title": "Update Branch" },
-      { "command": "gitBranches.checkout",       "title": "Checkout" },
-      { "command": "gitBranches.merge",          "title": "Merge into Current" },
-      { "command": "gitBranches.rebase",         "title": "Rebase onto This Branch" },
-      { "command": "gitBranches.cherryPick",     "title": "Cherry-pick Tip Commit" },
-      { "command": "gitBranches.rename",         "title": "Rename Branch" },
-      { "command": "gitBranches.push",           "title": "Push" },
-      { "command": "gitBranches.setUpstream",    "title": "Set Upstream" },
-      { "command": "gitBranches.createFrom",     "title": "Create Branch from Here" },
-      { "command": "gitBranches.deleteLocal",    "title": "Delete Branch" },
-      { "command": "gitBranches.checkoutRemote", "title": "Checkout (Create Tracking Branch)" },
-      { "command": "gitBranches.pull",           "title": "Fetch" },
-      { "command": "gitBranches.deleteRemote",   "title": "Delete Remote Branch" },
+      { "command": "gitBranches.update",              "title": "Update Branch" },
+      { "command": "gitBranches.checkout",           "title": "Checkout" },
+      { "command": "gitBranches.merge",              "title": "Merge into Current..." },
+      { "command": "gitBranches.rebase",             "title": "Rebase onto This Branch" },
+      { "command": "gitBranches.checkoutAndRebase",  "title": "Checkout and Rebase onto Current" },
+      { "command": "gitBranches.cherryPick",         "title": "Cherry-pick Tip Commit" },
+      { "command": "gitBranches.rename",             "title": "Rename Branch" },
+      { "command": "gitBranches.push",               "title": "Push" },
+      { "command": "gitBranches.setUpstream",        "title": "Set Upstream" },
+      { "command": "gitBranches.createFrom",         "title": "Create Branch from Here" },
+      { "command": "gitBranches.deleteLocal",        "title": "Delete Branch" },
+      { "command": "gitBranches.checkoutRemote",     "title": "Checkout (Create Tracking Branch)" },
+      { "command": "gitBranches.pull",               "title": "Fetch" },
+      { "command": "gitBranches.pullIntoCurrent",    "title": "Pull into Current Branch..." },
+      { "command": "gitBranches.compareWithCurrent", "title": "Compare with Current" },
+      { "command": "gitBranches.deleteRemote",       "title": "Delete Remote Branch" },
       { "command": "gitBranches.checkoutTag",    "title": "Checkout Tag" },
       { "command": "gitBranches.pushTag",        "title": "Push Tag" },
       { "command": "gitBranches.deleteTag",      "title": "Delete Tag" },
@@ -160,6 +163,11 @@
           "group": "1_checkout@2"
         },
         {
+          "command": "gitBranches.compareWithCurrent",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "1_checkout@3"
+        },
+        {
           "command": "gitBranches.update",
           "when": "view == gitBranches.branches && viewItem == localBranch",
           "group": "2_integrate@1"
@@ -172,12 +180,17 @@
         {
           "command": "gitBranches.rebase",
           "when": "view == gitBranches.branches && viewItem == localBranch",
-          "group": "2_integrate@2"
+          "group": "2_integrate@3"
+        },
+        {
+          "command": "gitBranches.checkoutAndRebase",
+          "when": "view == gitBranches.branches && viewItem == localBranch",
+          "group": "2_integrate@4"
         },
         {
           "command": "gitBranches.cherryPick",
           "when": "view == gitBranches.branches && viewItem == localBranch",
-          "group": "2_integrate@3"
+          "group": "2_integrate@5"
         },
         {
           "command": "gitBranches.push",
@@ -206,9 +219,19 @@
           "group": "1_checkout@1"
         },
         {
-          "command": "gitBranches.cherryPick",
+          "command": "gitBranches.compareWithCurrent",
+          "when": "view == gitBranches.branches && viewItem == remoteBranch",
+          "group": "1_checkout@2"
+        },
+        {
+          "command": "gitBranches.pullIntoCurrent",
           "when": "view == gitBranches.branches && viewItem == remoteBranch",
           "group": "2_integrate@1"
+        },
+        {
+          "command": "gitBranches.cherryPick",
+          "when": "view == gitBranches.branches && viewItem == remoteBranch",
+          "group": "2_integrate@2"
         },
         {
           "command": "gitBranches.pull",
