@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { BranchItem } from './branchTreeProvider';
+import { BranchItem, HiddenRepos, RepoItem } from './branchTreeProvider';
 import { Branch, GitApi, Ref, Repository } from './gitApi';
 
 const execFileAsync = promisify(execFile);
@@ -326,6 +326,7 @@ export function registerCommands(
     context: vscode.ExtensionContext,
     gitApi: GitApi,
     refresh: () => Promise<void>,
+    hiddenRepos: HiddenRepos,
 ): void {
     _refresh = refresh;
     const reg = (id: string, fn: (item?: BranchItem) => Promise<void>) =>
@@ -823,6 +824,71 @@ export function registerCommands(
 
     context.subscriptions.push(vscode.commands.registerCommand('gitBranches.refresh', async () => {
         await refresh();
+    }));
+
+    // ---- Multi-repo visibility ----
+
+    context.subscriptions.push(vscode.commands.registerCommand('gitBranches.hideRepository', async (item?: RepoItem) => {
+        if (!item) {
+            const visible = gitApi.repositories.filter(r => !hiddenRepos.isHidden(r));
+            if (visible.length === 0) { return; }
+            const picked = await vscode.window.showQuickPick(
+                visible.map(r => ({ label: r.rootUri.path.split('/').pop() ?? r.rootUri.fsPath, description: r.rootUri.fsPath, repo: r })),
+                { placeHolder: 'Hide repository from Git Branches view' }
+            );
+            if (!picked) { return; }
+            await hiddenRepos.hide(picked.repo);
+            return;
+        }
+        await hiddenRepos.hide(item.repo);
+    }));
+
+    context.subscriptions.push(vscode.commands.registerCommand('gitBranches.showInBranchesView', async (uri?: vscode.Uri) => {
+        if (!uri) {
+            vscode.window.showErrorMessage('No folder selected.');
+            return;
+        }
+        const target = uri.fsPath;
+        const findRepo = () => gitApi.repositories
+            .filter(r => target === r.rootUri.fsPath || target.startsWith(r.rootUri.fsPath + '/'))
+            .sort((a, b) => b.rootUri.fsPath.length - a.rootUri.fsPath.length)[0];
+
+        let repo = findRepo();
+
+        // Not currently tracked by vscode.git — ask it to open the folder as a repo.
+        // Required for sub-folders of a workspace that contain their own .git directory.
+        if (!repo && gitApi.openRepository) {
+            try {
+                await gitApi.openRepository(uri);
+            } catch {
+                // Will surface below as "no repo"
+            }
+            repo = findRepo();
+        }
+
+        if (!repo) {
+            vscode.window.showWarningMessage(`No git repository at "${target}".`);
+            return;
+        }
+        const name = repo.rootUri.path.split('/').pop() ?? repo.rootUri.fsPath;
+        if (!hiddenRepos.isHidden(repo)) {
+            vscode.window.showInformationMessage(`"${name}" is already visible in Git Branches.`);
+            return;
+        }
+        await hiddenRepos.show(repo.rootUri.fsPath);
+        vscode.window.showInformationMessage(`"${name}" added to Git Branches.`);
+    }));
+
+    context.subscriptions.push(vscode.commands.registerCommand('gitBranches.showHiddenRepository', async () => {
+        const paths = hiddenRepos.paths();
+        if (paths.length === 0) {
+            vscode.window.showInformationMessage('No hidden repositories.');
+            return;
+        }
+        const items = paths.map(p => ({ label: p.split('/').pop() ?? p, description: p, fsPath: p }));
+        const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Show hidden repository', canPickMany: false });
+        if (!picked) { return; }
+        await hiddenRepos.show(picked.fsPath);
     }));
 
     // ---- Branch history ----

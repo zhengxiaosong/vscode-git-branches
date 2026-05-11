@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { getGitApi } from './gitApi';
-import { BranchesProvider, TagProvider } from './branchTreeProvider';
+import { BranchesProvider, HiddenRepos, TagProvider } from './branchTreeProvider';
 import { registerCommands } from './commands';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -12,8 +12,9 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
     }
 
-    const branchesProvider = new BranchesProvider(gitApi);
-    const tagProvider = new TagProvider(gitApi);
+    const hiddenRepos = new HiddenRepos(context.workspaceState);
+    const branchesProvider = new BranchesProvider(gitApi, hiddenRepos);
+    const tagProvider = new TagProvider(gitApi, hiddenRepos);
 
     const branchesView = vscode.window.createTreeView('gitBranches.branches', {
         treeDataProvider: branchesProvider,
@@ -33,7 +34,7 @@ export function activate(context: vscode.ExtensionContext): void {
         tagProvider.invalidate();
     };
 
-    registerCommands(context, gitApi, refresh);
+    registerCommands(context, gitApi, refresh, hiddenRepos);
 
     context.subscriptions.push(
         branchesView,

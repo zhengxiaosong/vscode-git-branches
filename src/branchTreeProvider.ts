@@ -100,6 +100,38 @@ export class RepoItem extends vscode.TreeItem {
 
 type TreeNode = BranchItem | LocalGroupItem | RemoteSectionItem | RemoteGroupItem | RepoItem;
 
+// ---- Hidden-repos store (per-workspace) ----
+
+export class HiddenRepos {
+    private static readonly KEY = 'gitBranches.hiddenRepos';
+    private hidden: Set<string>;
+    private readonly _onDidChange = new vscode.EventEmitter<void>();
+    readonly onDidChange = this._onDidChange.event;
+
+    constructor(private memento: vscode.Memento) {
+        this.hidden = new Set(memento.get<string[]>(HiddenRepos.KEY, []));
+    }
+
+    isHidden(repo: Repository): boolean { return this.hidden.has(repo.rootUri.fsPath); }
+    hasAny(): boolean { return this.hidden.size > 0; }
+    paths(): string[] { return [...this.hidden]; }
+
+    async hide(repo: Repository): Promise<void> {
+        this.hidden.add(repo.rootUri.fsPath);
+        await this.persist();
+    }
+
+    async show(fsPath: string): Promise<void> {
+        this.hidden.delete(fsPath);
+        await this.persist();
+    }
+
+    private async persist(): Promise<void> {
+        await this.memento.update(HiddenRepos.KEY, [...this.hidden]);
+        this._onDidChange.fire();
+    }
+}
+
 // ---- Abstract base with repo lifecycle ----
 
 abstract class AbstractProvider implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable {
@@ -111,13 +143,18 @@ abstract class AbstractProvider implements vscode.TreeDataProvider<TreeNode>, vs
     // Used by subclasses to trigger a re-render without recursively triggering their invalidate logic
     protected fireChange(): void { this._onDidChangeTreeData.fire(); }
 
+    protected visibleRepos(): Repository[] {
+        return this.gitApi.repositories.filter(r => !this.hidden.isHidden(r));
+    }
+
     private repoListeners = new Map<Repository, vscode.Disposable>();
     private subscriptions: vscode.Disposable[] = [];
 
-    constructor(protected gitApi: GitApi) {
+    constructor(protected gitApi: GitApi, protected hidden: HiddenRepos) {
         this.subscriptions.push(
             gitApi.onDidOpenRepository(repo => this.attachRepo(repo)),
             gitApi.onDidCloseRepository(repo => this.detachRepo(repo)),
+            hidden.onDidChange(() => this._onDidChangeTreeData.fire()),
         );
         for (const repo of gitApi.repositories) {
             this.attachRepo(repo);
@@ -162,7 +199,7 @@ export class BranchesProvider extends AbstractProvider {
     }
 
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
-        const repos = this.gitApi.repositories;
+        const repos = this.visibleRepos();
 
         if (!element) {
             if (repos.length === 0) { return []; }
@@ -262,7 +299,7 @@ export class TagProvider extends AbstractProvider {
         this.syncCache.clear();
         super.invalidate();
         // Kick off background sync-status refresh; fireChange() re-renders when done
-        for (const repo of this.gitApi.repositories) {
+        for (const repo of this.visibleRepos()) {
             this.refreshTagSync(repo);
         }
     }
@@ -319,7 +356,7 @@ export class TagProvider extends AbstractProvider {
     }
 
     async getChildren(element?: TreeNode): Promise<TreeNode[]> {
-        const repos = this.gitApi.repositories;
+        const repos = this.visibleRepos();
         if (!element) {
             if (repos.length === 0) { return []; }
             if (repos.length === 1) { return this.getTagsForRepo(repos[0]); }

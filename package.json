@@ -57,6 +57,9 @@
       { "command": "gitBranches.createBranch",   "title": "Create Branch", "icon": "$(add)" },
       { "command": "gitBranches.createTag",      "title": "Create Tag",  "icon": "$(add)" },
       { "command": "gitBranches.openHistory",    "title": "View History", "icon": "$(history)" },
+      { "command": "gitBranches.hideRepository", "title": "Hide Repository" },
+      { "command": "gitBranches.showHiddenRepository", "title": "Show Hidden Repository...", "icon": "$(eye)" },
+      { "command": "gitBranches.showInBranchesView", "title": "Show in Git Branches" },
       { "command": "gitBranches.refresh",        "title": "Refresh",      "icon": "$(refresh)" }
     ],
     "menus": {
@@ -69,12 +72,22 @@
         {
           "command": "gitBranches.refresh",
           "when": "view == gitBranches.branches || view == gitBranches.tags",
-          "group": "navigation@2"
+          "group": "navigation@3"
         },
         {
           "command": "gitBranches.createTag",
           "when": "view == gitBranches.tags",
           "group": "navigation@2"
+        },
+        {
+          "command": "gitBranches.showHiddenRepository",
+          "when": "view == gitBranches.branches || view == gitBranches.tags",
+          "group": "9_visibility@1"
+        },
+        {
+          "command": "gitBranches.hideRepository",
+          "when": "view == gitBranches.branches || view == gitBranches.tags",
+          "group": "9_visibility@2"
         }
       ],
       "view/item/context": [
@@ -258,6 +271,19 @@
           "command": "gitBranches.deleteTag",
           "when": "view == gitBranches.tags && viewItem == tag",
           "group": "3_destructive@1"
+        },
+
+        {
+          "command": "gitBranches.hideRepository",
+          "when": "(view == gitBranches.branches || view == gitBranches.tags) && viewItem == repository",
+          "group": "9_visibility@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "gitBranches.showInBranchesView",
+          "when": "explorerResourceIsFolder",
+          "group": "5_gitbranches@1"
         }
       ]
     }
