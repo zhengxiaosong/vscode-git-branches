@@ -1,6 +1,6 @@
 {
   "name": "vscode-git-branches",
-  "displayName": "Git Branches",
+  "displayName": "Git Branches Sidebar",
   "description": "Local branches, remote branches, and tags management in the SCM sidebar",
   "version": "0.0.2",
   "publisher": "zhengxiaosong",
