@@ -1,6 +1,9 @@
 .git/**
+.gitignore
 .vscode/**
+.vscodeignore
 .claude/**
+CLAUDE.md
 src/**
 node_modules/**
 esbuild.js
@@ -8,3 +11,4 @@ tsconfig.json
 package-lock.json
 out/**/*.js.map
 images/*.svg
+*.vsix
